@@ -13,11 +13,24 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cstring>
 
 using std::string;
 using std::vector;
 
-static  string const  syspath = {"/sys/class/gpio/"};
+static	string const  syspath = {"/sys/class/gpio/"};
+
+enum gpio_direction
+{
+	DIRECTION_IN,
+	DIRECTION_OUT
+};
+
+struct gpio_conf
+{
+		int num;
+		gpio_direction direction;
+};
 
 class Gpio {
 	public:
@@ -25,6 +38,7 @@ class Gpio {
 	private:
 
 		unsigned m_gpionum;
+		gpio_direction m_direction;
 		valtype m_buffer;
 
 		string valfilename;
@@ -35,7 +49,7 @@ class Gpio {
 	public:
 		int get_fd()const {return fd;}
 
-		int get_gpionum()const  {
+		int get_gpionum()const	{
 			return m_gpionum;};
 		
 		void register_for_valchange(const callback & cb){
@@ -60,34 +74,53 @@ class Gpio {
 			lseek(fd,0,SEEK_SET);
 		}
 
-		Gpio(int gpionum):
-			m_gpionum(gpionum),
+		bool write_value(int value)
+		{
+			char buf[16];
+			snprintf(buf, 15, "%i", value);
+			if (write(fd, buf, strlen(buf)) == -1) {
+				L::log <<"cannot write value!" << std::endl;
+				return false;
+			}
+			return true;
+		}
+
+		Gpio(gpio_conf &conf):
+			m_gpionum(conf.num),
+			m_direction(conf.direction),
 			fd(0)
 		{
 			//try export
 			std::ofstream exporter((syspath + "export").c_str(), std::ios::out);
-			exporter << gpionum;
+			exporter << conf.num;
 			exporter.close();
 			//dont catch... just fail
 
 			//try set output direction
-			std::ofstream fs(syspath+ "gpio" + std::to_string(gpionum) + "/direction", std::ios::out);
-			fs << "in";
+			std::ofstream fs(syspath+ "gpio" + std::to_string(conf.num) + "/direction", std::ios::out);
+			fs << (m_direction == DIRECTION_IN) ? "in" : "out";
 			fs.close();
 			//try set edge triggd
-			std::ofstream fs2(syspath+ "gpio" + std::to_string(gpionum) + "/edge", std::ios::out);
+			std::ofstream fs2(syspath+ "gpio" + std::to_string(conf.num) + "/edge", std::ios::out);
 			fs2 << "both";
 			fs2.close();
 
-			valfilename = syspath+ "gpio" +  std::to_string(gpionum) + "/value";
+			valfilename = syspath+ "gpio" +	 std::to_string(conf.num) + "/value";
 		}
 
 		void init_stage_2(void){
-			fd = open(valfilename.c_str(), O_RDONLY |O_NONBLOCK);
+			fd = open(valfilename.c_str(),
+				  (m_direction == DIRECTION_IN) ? (O_RDONLY | O_NONBLOCK) : O_WRONLY
+				);
 			if(fd==-1){
 				throw(std::runtime_error("blah"));
 			}
-			read_update();
+			if (m_direction == DIRECTION_IN) {
+				read_update();
+			} else {
+				// Init with 0
+				write_value(0);
+			}
 
 		}
 

@@ -27,10 +27,18 @@ using std::map;
 //of configuration file.
 //
 struct me_config {
-	const vector<int> gpionums        = {17,23,24};
+	const vector<gpio_conf> gpionums  = {
+		{ .num = 17, .direction = DIRECTION_IN },  // UNUSED?
+		#define GPIO_LOCK_OPEN 18
+		{ .num = 18, .direction = DIRECTION_OUT },
+		{ .num = 23, .direction = DIRECTION_IN },
+		{ .num = 24, .direction = DIRECTION_IN }
+	};
 	const std::pair<int,int> dialconf = {23,24};
-	unsigned uchan_port               = 12345;
-	string uchanprfx                  = "tcp://*:";
+	unsigned uchan_port		  = 12345;
+	string uchanprfx		  = "tcp://*:";
+	unsigned rpc_port		  = 23456;
+	string rpcprfx			  = "tcp://*:";
 } cfg;
 
 
@@ -133,6 +141,7 @@ class Server{
 	private:
 		zmq::socket_t uchan;
 		zmq::socket_t notif;
+		zmq::socket_t rpc;
 
 		vector<Gpio> gpios;
 		vector<zmq::pollitem_t> pollits;
@@ -160,10 +169,11 @@ class Server{
 		Server(struct me_config cfg) :
 			is_running(true),
 			uchan(ctx,ZMQ_XPUB),
-			notif(ctx,ZMQ_PAIR)
+			notif(ctx,ZMQ_PAIR),
+			rpc(ctx,ZMQ_REQ)
 	{
-		for (auto num : cfg.gpionums){
-			gpios.emplace_back(num);
+		for (auto gpio_conf : cfg.gpionums){
+			gpios.emplace_back(Gpio(gpio_conf));
 		}
 		for (auto &i : gpios){
 			L::log << i.get_gpionum() << std::endl;
@@ -175,11 +185,16 @@ class Server{
 		uchan.setsockopt(ZMQ_XPUB_VERBOSE, &eins, sizeof(eins));
 		uchan.bind(uchanaddr.c_str());
 		notif.bind("inproc://notify");
+		string rpcaddr(cfg.rpcprfx + std::to_string(cfg.rpc_port));
+		rpc.bind(rpcaddr.c_str());
 		pollits.emplace_back();
 		pollits.back().socket = uchan;
 		pollits.back().events = ZMQ_POLLIN;
 		pollits.emplace_back();
 		pollits.back().socket = notif;
+		pollits.back().events = ZMQ_POLLIN;
+		pollits.emplace_back();
+		pollits.back().socket = rpc;
 		pollits.back().events = ZMQ_POLLIN;
 		std::thread gpiothread(gpiopolllop, std::ref(gpios),std::ref(ctx));
 		gpiothread.detach();
@@ -203,6 +218,27 @@ class Server{
 			L::log << L::BGBLUE << L::YELLOW << " Value notification: " << buf << 
 				L::NORMAL << std::endl;
 			uchan.send(buf,10,0);
+		}
+		if (pollits[2].revents & ZMQ_POLLIN){
+			//request/response :-)
+			rpc.recv(buf,11,0);
+			switch(buf[0]) {
+			case 'L':
+			  // *L*ock control
+			  for (auto &i : gpios){
+			    if (i.get_gpionum() == GPIO_LOCK_OPEN) {
+			      i.write_value(1);
+			      usleep(20 * 1000);  // 20ms between 1, 0
+			      i.write_value(0);
+			      usleep(20 * 1000);  // hold 0 to forbid a long 1 with consecutive requests
+			    }
+			  }
+			  strcpy(buf, "Ok");
+			  break;
+			default:
+			  strcpy(buf, "Error");
+			}
+			rpc.send(buf,strlen(buf),0);
 		}
 	}
 
