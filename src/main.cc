@@ -170,7 +170,7 @@ class Server{
 			is_running(true),
 			uchan(ctx,ZMQ_XPUB),
 			notif(ctx,ZMQ_PAIR),
-			rpc(ctx,ZMQ_REQ)
+			rpc(ctx,ZMQ_REP)
 	{
 		for (auto gpio_conf : cfg.gpionums){
 			gpios.emplace_back(Gpio(gpio_conf));
