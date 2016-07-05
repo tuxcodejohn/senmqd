@@ -98,7 +98,7 @@ class Gpio {
 
 			//try set output direction
 			std::ofstream fs(syspath+ "gpio" + std::to_string(conf.num) + "/direction", std::ios::out);
-			fs << (m_direction == DIRECTION_IN) ? "in" : "out";
+			fs << (m_direction == DIRECTION_IN ? "in" : "out");
 			fs.close();
 			//try set edge triggd
 			std::ofstream fs2(syspath+ "gpio" + std::to_string(conf.num) + "/edge", std::ios::out);
